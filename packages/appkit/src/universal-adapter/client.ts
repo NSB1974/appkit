@@ -63,13 +63,13 @@ export class UniversalAdapter extends AdapterBlueprint {
     namespace: ChainNamespace
   }): Promise<AdapterBlueprint.GetAccountsResult> {
     const provider = this.provider as UniversalProvider
-    const addresses = provider?.session?.namespaces?.[namespace]?.accounts
+    const addresses = (provider?.session?.namespaces?.[namespace]?.accounts
       ?.map(account => {
         const [, , address] = account.split(':')
 
         return address
       })
-      .filter((address, index, self) => self.indexOf(address) === index) as string[]
+      .filter((address, index, self) => self.indexOf(address) === index) || []) as string[]
 
     return Promise.resolve({
       accounts: addresses.map(address =>
@@ -194,7 +194,7 @@ export class UniversalAdapter extends AdapterBlueprint {
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
-  public async switchNetwork(params: AdapterBlueprint.SwitchNetworkParams) {
+  public override async switchNetwork(params: AdapterBlueprint.SwitchNetworkParams) {
     const { caipNetwork } = params
     const connector = this.connectors.find(c => c.type === 'WALLET_CONNECT')
     const provider = connector?.provider as UniversalProvider
@@ -202,7 +202,7 @@ export class UniversalAdapter extends AdapterBlueprint {
     if (!provider) {
       throw new Error('UniversalAdapter:switchNetwork - provider is undefined')
     }
-    provider.setDefaultChain(`${caipNetwork.chainNamespace}:${String(caipNetwork.id)}`)
+    provider.setDefaultChain(caipNetwork.caipNetworkId)
   }
 
   public getWalletConnectProvider() {

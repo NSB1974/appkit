@@ -6,7 +6,8 @@ import {
   type CombinedProvider,
   type Connector,
   type ConnectorType,
-  type Provider
+  type Provider,
+  OptionsController
 } from '@reown/appkit-core'
 import { ConstantsUtil, PresetsUtil } from '@reown/appkit-utils'
 import { EthersHelpersUtil, type ProviderType } from '@reown/appkit-utils/ethers'
@@ -346,7 +347,8 @@ export class Ethers5Adapter extends AdapterBlueprint {
 
     if (type === 'AUTH') {
       const { address } = await (selectedProvider as unknown as W3mFrameProvider).connect({
-        chainId
+        chainId,
+        preferredAccountType: OptionsController.state.defaultAccountTypes.eip155
       })
 
       accounts = [address]
@@ -359,12 +361,30 @@ export class Ethers5Adapter extends AdapterBlueprint {
         method: 'eth_chainId'
       })
 
+      if (requestChainId !== chainId) {
+        const caipNetwork = this.caipNetworks?.find(n => n.id === chainId)
+
+        if (!caipNetwork) {
+          throw new Error('Ethers5Adapter:connect - could not find the caipNetwork to switch')
+        }
+
+        try {
+          await this.switchNetwork({
+            caipNetwork,
+            provider: selectedProvider,
+            providerType: type as ConnectorType
+          })
+        } catch (error) {
+          throw new Error('Ethers5Adapter:connect - Switch network failed')
+        }
+      }
+
       this.listenProviderEvents(selectedProvider)
     }
 
     return {
       address: accounts[0] as `0x${string}`,
-      chainId: Number(requestChainId) || Number(chainId),
+      chainId: Number(chainId),
       provider: selectedProvider,
       type: type as ConnectorType,
       id
@@ -407,7 +427,10 @@ export class Ethers5Adapter extends AdapterBlueprint {
     const connector = this.connectors.find(c => c.id === id)
 
     if (connector && connector.type === 'AUTH' && chainId) {
-      await (connector.provider as W3mFrameProvider).connect({ chainId })
+      await (connector.provider as W3mFrameProvider).connect({
+        chainId,
+        preferredAccountType: OptionsController.state.defaultAccountTypes.eip155
+      })
     }
   }
 
@@ -526,38 +549,34 @@ export class Ethers5Adapter extends AdapterBlueprint {
     }
   }
 
-  public async switchNetwork(params: AdapterBlueprint.SwitchNetworkParams): Promise<void> {
+  public override async switchNetwork(params: AdapterBlueprint.SwitchNetworkParams): Promise<void> {
     const { caipNetwork, provider, providerType } = params
-    if (providerType === 'WALLET_CONNECT') {
-      ;(provider as UniversalProvider).setDefaultChain(String(`eip155:${String(caipNetwork.id)}`))
-    } else if (providerType === 'AUTH') {
-      const authProvider = provider as W3mFrameProvider
-      await authProvider.switchNetwork(caipNetwork.id)
-      await authProvider.connect({
-        chainId: caipNetwork.id
+
+    if (providerType === 'AUTH' || providerType === 'WALLET_CONNECT') {
+      await super.switchNetwork(params)
+
+      return
+    }
+
+    try {
+      await (provider as Provider).request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: EthersHelpersUtil.numberToHexString(caipNetwork.id) }]
       })
-    } else {
-      try {
-        await (provider as Provider).request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: EthersHelpersUtil.numberToHexString(caipNetwork.id) }]
-        })
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } catch (switchError: any) {
-        if (
-          switchError.code === WcConstantsUtil.ERROR_CODE_UNRECOGNIZED_CHAIN_ID ||
-          switchError.code === WcConstantsUtil.ERROR_CODE_DEFAULT ||
-          switchError?.data?.originalError?.code ===
-            WcConstantsUtil.ERROR_CODE_UNRECOGNIZED_CHAIN_ID
-        ) {
-          await EthersHelpersUtil.addEthereumChain(provider as Provider, caipNetwork)
-        } else if (
-          providerType === 'ANNOUNCED' ||
-          providerType === 'EXTERNAL' ||
-          providerType === 'INJECTED'
-        ) {
-          throw new Error('Chain is not supported')
-        }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (switchError: any) {
+      if (
+        switchError.code === WcConstantsUtil.ERROR_CODE_UNRECOGNIZED_CHAIN_ID ||
+        switchError.code === WcConstantsUtil.ERROR_CODE_DEFAULT ||
+        switchError?.data?.originalError?.code === WcConstantsUtil.ERROR_CODE_UNRECOGNIZED_CHAIN_ID
+      ) {
+        await EthersHelpersUtil.addEthereumChain(provider as Provider, caipNetwork)
+      } else if (
+        providerType === 'ANNOUNCED' ||
+        providerType === 'EXTERNAL' ||
+        providerType === 'INJECTED'
+      ) {
+        throw new Error('Chain is not supported')
       }
     }
   }
