@@ -1,0 +1,1 @@
+npm i @reown/appkit @reown/appkit-adapter-wagmi wagmi viem @tanstack/react-query
